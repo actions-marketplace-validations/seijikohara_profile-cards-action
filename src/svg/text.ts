@@ -31,6 +31,17 @@ export function measureSans(text: string, size: number, weight: FontWeight = 're
   return em * size * (weight === 'semibold' ? BOLD_FACTOR : 1);
 }
 
+/**
+ * Advance width of the mono stack, in em. Every member of the stack is
+ * monospaced, so one constant covers all of them.
+ */
+const MONO_EM = 0.6;
+
+/** Estimated rendered width of `text` at `size` px in the mono stack. */
+export function measureMono(text: string, size: number): number {
+  return Array.from(text).length * size * MONO_EM;
+}
+
 /** 12345 -> "12,345". Hand-rolled so output never depends on ICU data. */
 export function formatInt(v: number): string {
   const sign = v < 0 ? '-' : '';
@@ -66,6 +77,14 @@ export function formatDate(date: string, withYear: boolean): string {
   if (!m || month === undefined) throw new Error(`invalid calendar date: ${date}`);
   const day = Number(m[3]);
   return withYear ? `${month} ${day}, ${m[1]}` : `${month} ${day}`;
+}
+
+/** "2026-08-12" -> "Aug 2026". */
+export function formatMonthYear(date: string): string {
+  const m = /^(\d{4})-(\d{2})-\d{2}$/.exec(date);
+  const month = m ? MONTHS[Number(m[2]) - 1] : undefined;
+  if (!m || month === undefined) throw new Error(`invalid calendar date: ${date}`);
+  return `${month} ${m[1]}`;
 }
 
 /** Inclusive range, collapsing a shared year: "May 31 – Jul 22, 2026". */

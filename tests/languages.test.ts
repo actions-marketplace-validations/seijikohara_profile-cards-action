@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
+import { renderLanguages } from '../src/cards/languages.js';
 import { languageShares } from '../src/compute/languages.js';
-import type { LanguageSlice } from '../src/model.js';
+import type { LanguageSlice, ProfileData } from '../src/model.js';
+import { LIGHT } from '../src/theme.js';
+import { makeFixture } from './fixture.js';
+import { assertWellFormed } from './xml.js';
 
 function slice(name: string, bytes: number): LanguageSlice {
-  return { name, color: '#123456', bytes };
+  return { name, color: '#123456', bytes, repos: 1 };
 }
 
 describe('languageShares', () => {
@@ -18,6 +22,26 @@ describe('languageShares', () => {
     expect(shares).toHaveLength(9);
     expect(shares.at(-1)?.name).toBe('Other');
     expect(shares.at(-1)?.color).toBeNull();
+    expect(shares.at(-1)?.bytes).toBe(992 + 991 + 990);
+  });
+
+  it('keeps Other last even when the folded tail outweighs every language kept', () => {
+    // 3 x ~990 bytes folded against a top language of 1000: Other outranks the
+    // whole list by size and still belongs at the end, because it is the
+    // remainder rather than an entry competing for a rank.
+    const slices = Array.from({ length: 11 }, (_, index) => slice(`L${index}`, 1000 - index));
+    const shares = languageShares(slices, 8);
+    const other = shares.at(-1);
+    expect(other?.name).toBe('Other');
+    expect(other?.bytes).toBeGreaterThan(shares[0]?.bytes ?? 0);
+  });
+
+  it('ranks the kept languages by size ahead of Other', () => {
+    const slices = Array.from({ length: 11 }, (_, index) => slice(`L${index}`, 1000 - index));
+    const kept = languageShares(slices, 8)
+      .slice(0, -1)
+      .map((share) => share.bytes);
+    expect(kept).toEqual(kept.toSorted((a, b) => b - a));
   });
 
   it('omits Other when everything fits', () => {
@@ -42,5 +66,64 @@ describe('languageShares', () => {
     expect(shares[0]?.pct).toBeCloseTo(59.4, 1);
     const total = shares.reduce((sum, share) => sum + share.pct, 0);
     expect(Math.round(total * 10)).toBe(1000);
+  });
+});
+
+describe('languageShares with unnamed bytes', () => {
+  const slices = [
+    { name: 'TypeScript', color: '#3178c6', bytes: 600, repos: 3 },
+    { name: 'Rust', color: '#dea584', bytes: 300, repos: 2 },
+  ];
+
+  it('counts unnamed bytes in the denominator', () => {
+    const shares = languageShares(slices, 8, 100);
+    expect(shares.find((share) => share.name === 'TypeScript')?.pct).toBe(60);
+    expect(shares.find((share) => share.name === 'Rust')?.pct).toBe(30);
+  });
+
+  it('folds unnamed bytes into a trailing Other row', () => {
+    const shares = languageShares(slices, 8, 100);
+    expect(shares.at(-1)).toMatchObject({ name: 'Other', bytes: 100, pct: 10 });
+  });
+
+  it('merges unnamed bytes with the truncated tail rather than replacing it', () => {
+    const shares = languageShares(slices, 1, 100);
+    expect(shares).toHaveLength(2);
+    expect(shares.at(-1)).toMatchObject({ name: 'Other', bytes: 400 });
+  });
+
+  it('still sums to exactly 100.0', () => {
+    const shares = languageShares(slices, 8, 7);
+    const sum = shares.reduce((total, share) => total + share.pct, 0);
+    expect(Math.round(sum * 10) / 10).toBe(100);
+  });
+
+  it('leaves shares unchanged when nothing was left unnamed', () => {
+    expect(languageShares(slices, 8, 0)).toEqual(languageShares(slices, 8));
+  });
+});
+
+describe('language reach', () => {
+  const slices = [
+    { name: 'TypeScript', color: '#3178c6', bytes: 600, repos: 3 },
+    { name: 'Rust', color: '#dea584', bytes: 300, repos: 2 },
+    { name: 'CSS', color: null, bytes: 100, repos: 9 },
+  ];
+
+  it("carries each language's repository count through to the share", () => {
+    expect(languageShares(slices, 8).map((share) => share.repos)).toEqual([3, 2, 9]);
+  });
+
+  it('reports no reach for Other, which spans an unknown set', () => {
+    const shares = languageShares(slices, 2);
+    expect(shares.at(-1)).toMatchObject({ name: 'Other', repos: 0 });
+  });
+
+  it('renders the count as a dash where there is none', () => {
+    const data: ProfileData = { ...makeFixture(), languages: slices, languageTailBytes: 0 };
+    const svg = renderLanguages(data, LIGHT, '', 2);
+    assertWellFormed(svg);
+    expect(svg).toContain('>REPOS<');
+    expect(svg).toContain('>—<');
   });
 });

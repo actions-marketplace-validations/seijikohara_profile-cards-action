@@ -1,7 +1,7 @@
 /** Deterministic synthetic profile data for tests and the preview app. */
 
 import { range } from '../src/iter.js';
-import type { CommitSample, DayContribution, ProfileData, RepoCommits } from '../src/model.js';
+import type { CommitSample, DayContribution, PortfolioRepo, ProfileData, RepoCommits } from '../src/model.js';
 
 const MULBERRY_INCREMENT = 0x6d2b79f5;
 
@@ -113,7 +113,7 @@ function pad2(value: number): string {
 function commitSamples(): readonly CommitSample[] {
   const seed = 20260817;
   const end = Date.parse('2026-07-22T00:00:00Z');
-  const DRAWS_PER_COMMIT = 6; // hour condition, hour value, suffix, minute, additions, deletions
+  const DRAWS_PER_COMMIT = 7; // hour condition, hour value, suffix, minute, additions, deletions, files
   const { samples } = range(365).reduce<{ readonly draw: number; readonly samples: readonly CommitSample[] }>(
     (acc, offset) => {
       const index = 364 - offset;
@@ -139,6 +139,8 @@ function commitSamples(): readonly CommitSample[] {
           date: `${dateStr(ms)}T${pad2(hour)}:${pad2(Math.floor(randAt(seed, base + 3) * 60))}:00${suffix}`,
           additions: Math.ceil(randAt(seed, base + 4) * 120),
           deletions: Math.floor(randAt(seed, base + 5) * 60),
+          // A small share of commits have no computed diff, as the API returns.
+          changedFiles: randAt(seed, base + 6) < 0.08 ? null : 1 + Math.floor(randAt(seed, base + 6) * 9),
         };
       });
       return { draw: dayDraws + count * DRAWS_PER_COMMIT, samples: [...acc.samples, ...commits] };
@@ -148,19 +150,93 @@ function commitSamples(): readonly CommitSample[] {
   return samples;
 }
 
-/** A ranking with a clear leader, mid-field ties, and a long name to exercise truncation. */
+const TYPESCRIPT = { name: 'TypeScript', color: '#3178c6' };
+const RUST = { name: 'Rust', color: '#dea584' };
+const KOTLIN = { name: 'Kotlin', color: '#A97BFF' };
+
+/**
+ * A ranking with a clear leader, mid-field ties, and a long name to exercise
+ * truncation. The last rows cover the card's optional fields: a repository with
+ * no detected language, one with no stars, several with no issues, and one
+ * whose lifetime commit count is unknown.
+ */
 function topRepositories(): RepoCommits[] {
   return [
-    { nameWithOwner: 'seijikohara/vizel', commits: 379 },
-    { nameWithOwner: 'seijikohara/femto-car-launcher', commits: 371 },
-    { nameWithOwner: 'seijikohara/kogu', commits: 308 },
-    { nameWithOwner: 'seijikohara/db-tester', commits: 194 },
-    { nameWithOwner: 'seijikohara/seijikohara', commits: 168 },
-    { nameWithOwner: 'seijikohara/profile-cards-action', commits: 130 },
-    { nameWithOwner: 'open-telemetry/opentelemetry-js-contrib-examples', commits: 24 },
-    { nameWithOwner: 'seijikohara/docker-compose-cache-action', commits: 24 },
-    { nameWithOwner: 'seijikohara/dotfiles', commits: 9 },
+    {
+      nameWithOwner: 'seijikohara/vizel',
+      commits: 379,
+      issues: 122,
+      lifetimeCommits: 540,
+      language: TYPESCRIPT,
+      stars: 12,
+    },
+    {
+      nameWithOwner: 'seijikohara/femto-car-launcher',
+      commits: 371,
+      issues: 2,
+      lifetimeCommits: 452,
+      language: RUST,
+      stars: 4,
+    },
+    { nameWithOwner: 'seijikohara/kogu', commits: 308, issues: 21, lifetimeCommits: 445, language: KOTLIN, stars: 31 },
+    {
+      nameWithOwner: 'seijikohara/db-tester',
+      commits: 194,
+      issues: 102,
+      lifetimeCommits: 336,
+      language: KOTLIN,
+      stars: 2,
+    },
+    {
+      nameWithOwner: 'seijikohara/seijikohara',
+      commits: 168,
+      issues: 0,
+      lifetimeCommits: 372,
+      language: TYPESCRIPT,
+      stars: 1,
+    },
+    {
+      nameWithOwner: 'seijikohara/profile-cards-action',
+      commits: 130,
+      issues: 0,
+      lifetimeCommits: 130,
+      language: TYPESCRIPT,
+      stars: 8,
+    },
+    {
+      nameWithOwner: 'open-telemetry/opentelemetry-js-contrib-examples',
+      commits: 24,
+      issues: 1,
+      lifetimeCommits: 24,
+      language: TYPESCRIPT,
+      stars: 1204,
+    },
+    {
+      nameWithOwner: 'seijikohara/docker-compose-cache-action',
+      commits: 24,
+      issues: 7,
+      lifetimeCommits: 207,
+      language: TYPESCRIPT,
+      stars: 3,
+    },
+    { nameWithOwner: 'seijikohara/dotfiles', commits: 9, issues: 0, lifetimeCommits: 0, language: null, stars: 0 },
   ];
+}
+
+const LICENSES = ['MIT', 'MIT', 'Apache-2.0', 'MIT', null, 'MIT', null, 'MIT', null, 'MIT', null, 'MIT'] as const;
+
+/** Owned source repositories with staggered creation and push dates. */
+function portfolioRepos(): PortfolioRepo[] {
+  return topRepositories().map((repo, index) => ({
+    nameWithOwner: repo.nameWithOwner,
+    createdAt: `${2016 + index}-03-${String(((index * 7) % 27) + 1).padStart(2, '0')}T09:00:00Z`,
+    pushedAt: `2026-0${((index % 7) + 1).toString()}-1${index % 9}T09:00:00Z`,
+    commits: repo.commits * 3 + 40,
+    language: repo.language,
+    stars: repo.stars,
+    diskUsageKb: 1200 * (index + 3),
+    license: LICENSES[index] ?? null,
+  }));
 }
 
 export function makeFixture(): ProfileData {
@@ -175,18 +251,19 @@ export function makeFixture(): ProfileData {
     issues: 349,
     contributedTo: 14,
     languages: [
-      { name: 'TypeScript', color: '#3178c6', bytes: 7_036_949 },
-      { name: 'Kotlin', color: '#A97BFF', bytes: 2_760_299 },
-      { name: 'Java', color: '#b07219', bytes: 2_051_464 },
-      { name: 'Vue', color: '#41b883', bytes: 1_140_778 },
-      { name: 'Rust', color: '#dea584', bytes: 708_082 },
-      { name: 'Svelte', color: '#ff3e00', bytes: 153_850 },
-      { name: 'SCSS', color: '#c6538c', bytes: 113_413 },
-      { name: 'Groovy', color: '#4298b8', bytes: 91_455 },
-      { name: 'Processing', color: '#0096D8', bytes: 79_705 },
-      { name: 'Python', color: '#3572A5', bytes: 66_688 },
-      { name: 'C++', color: '#f34b7d', bytes: 56_931 },
+      { name: 'TypeScript', color: '#3178c6', bytes: 7_036_949, repos: 14 },
+      { name: 'Kotlin', color: '#A97BFF', bytes: 2_760_299, repos: 6 },
+      { name: 'Java', color: '#b07219', bytes: 2_051_464, repos: 5 },
+      { name: 'Vue', color: '#41b883', bytes: 1_140_778, repos: 4 },
+      { name: 'Rust', color: '#dea584', bytes: 708_082, repos: 2 },
+      { name: 'Svelte', color: '#ff3e00', bytes: 153_850, repos: 1 },
+      { name: 'SCSS', color: '#c6538c', bytes: 113_413, repos: 3 },
+      { name: 'Groovy', color: '#4298b8', bytes: 91_455, repos: 2 },
+      { name: 'Processing', color: '#0096D8', bytes: 79_705, repos: 1 },
+      { name: 'Python', color: '#3572A5', bytes: 66_688, repos: 2 },
+      { name: 'C++', color: '#f34b7d', bytes: 56_931, repos: 1 },
     ],
+    languageTailBytes: 0,
     years: [
       { year: 2014, total: 43, commits: 0, pullRequests: 0, issues: 0, reviews: 0, restricted: 42 },
       { year: 2015, total: 706, commits: 43, pullRequests: 0, issues: 0, reviews: 0, restricted: 658 },
@@ -202,13 +279,21 @@ export function makeFixture(): ProfileData {
       { year: 2025, total: 964, commits: 587, pullRequests: 259, issues: 72, reviews: 3, restricted: 34 },
       { year: 2026, total: 3333, commits: 1531, pullRequests: 1213, issues: 269, reviews: 3, restricted: 309 },
     ],
+    includesPrivate: true,
     lifetimeDays: lifetimeDays(),
     trailing: {
       days: trailing,
       total: trailing.reduce((sum, day) => sum + day.count, 0),
+      includesPrivate: true,
     },
     commits: commitSamples(),
+    commitSweep: { swept: 18, candidates: 18 },
     topRepositories: topRepositories(),
+    popularPullRequest: {
+      title: 'Add mouse-based tab drag functionality for reordering and detachment',
+      nameWithOwner: 'kovidgoyal/kitty',
+    },
+    repositories: portfolioRepos(),
     trailingCommits: { total: 1432, repositories: 18 },
     generatedAt: '2026-07-22T03:17:00.000Z',
   };

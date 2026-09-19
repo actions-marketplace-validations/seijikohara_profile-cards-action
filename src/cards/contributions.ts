@@ -9,13 +9,16 @@
  * channel, never the primary encoding.
  */
 
-import { CARD_PADDING, CARD_WIDTH } from '../config.js';
+import type { LegendStyle } from '../cards.js';
+import { CARD_PADDING, CARD_WIDTH, DEFAULT_LEGEND } from '../config.js';
+import { calendarThresholds } from '../compute/thresholds.js';
 import { range } from '../iter.js';
 import type { DayContribution, ProfileData, Streaks } from '../model.js';
 import { el, num, textNode } from '../svg/dsl.js';
 import { formatDate, formatDateRange, formatInt, formatUtcTimestamp } from '../svg/text.js';
 import { shade, type Theme } from '../theme.js';
 import { cardFrame, tileRow, type TileSpec } from './frame.js';
+import { privacyNote, rampLegend, RAMP_SCALE_ROW } from './legend.js';
 
 // Axonometric tile: 24px wide, 8px tall footprint (3:1 — flatter than true
 // isometric, which keeps the 53-week ribbon from eating vertical space).
@@ -70,7 +73,13 @@ export function toWeeks(days: readonly DayContribution[]): readonly (readonly Da
   return range(Math.ceil(days.length / 7)).map((week) => days.slice(week * 7, week * 7 + 7));
 }
 
-export function renderContributions(data: ProfileData, streaks: Streaks, theme: Theme, fontFaceCss: string): string {
+export function renderContributions(
+  data: ProfileData,
+  streaks: Streaks,
+  theme: Theme,
+  fontFaceCss: string,
+  legendStyle: LegendStyle = DEFAULT_LEGEND
+): string {
   const weeks = toWeeks(data.trailing.days);
   const weekCount = weeks.length;
   const maxCount = Math.max(1, ...data.trailing.days.map((day) => day.count));
@@ -158,38 +167,25 @@ export function renderContributions(data: ProfileData, streaks: Streaks, theme: 
 
   // Legend (bottom-left) and refresh caption (bottom-right).
   const legendY = groundBottom + 22;
-  const swatches = theme.contribRamp.map((color, index) =>
-    el('rect', {
-      x: CARD_PADDING + 34 + index * 14,
-      y: legendY - 9,
-      width: 10,
-      height: 10,
-      rx: 2,
-      fill: color,
-    })
-  );
-  const legend =
-    el('text', { x: CARD_PADDING, y: legendY, class: 't-tick' }, textNode('Less')) +
-    swatches.join('') +
-    el(
-      'text',
-      { x: CARD_PADDING + 34 + theme.contribRamp.length * 14 + 4, y: legendY, class: 't-tick' },
-      textNode('More')
-    );
+  // The isometric columns are leveled by the API's own daily quartiles, so the
+  // scale counts contributions per day.
+  const scale =
+    legendStyle === 'scale' ? { thresholds: calendarThresholds(data.trailing.days), unit: 'per day' } : undefined;
+  const legend = rampLegend(theme, CARD_PADDING, legendY, scale === undefined ? {} : { scale });
   const caption = el(
     'text',
     { x: CARD_WIDTH - CARD_PADDING, y: legendY, class: 't-mono', 'text-anchor': 'end' },
     textNode(`REFRESHED ${formatUtcTimestamp(data.generatedAt)}`)
   );
 
-  const height = legendY + CARD_PADDING - 8;
+  const height = legendY + (scale === undefined ? 0 : RAMP_SCALE_ROW) + CARD_PADDING - 8;
 
   return cardFrame(
     {
       theme,
       height,
       title: 'Contributions',
-      note: 'past 12 months · streaks over all years',
+      note: `past 12 months · streaks over all years · ${privacyNote(data.trailing.includesPrivate)}`,
       description: `Contribution activity for ${data.login}: ${formatInt(data.trailing.total)} contributions in the past 12 months, current streak ${formatInt(streaks.current)} days, longest streak ${formatInt(streaks.longest)} days.`,
       extraCss: `.iso{opacity:0;animation:rise .5s cubic-bezier(.2,.7,.3,1) forwards}`,
       fontFaceCss,

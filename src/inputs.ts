@@ -1,6 +1,8 @@
 /** Read and validate the action's inputs into a typed configuration object. */
 
 import * as core from '@actions/core';
+import type { LegendStyle } from './cards.js';
+import { DEFAULT_COMMIT_SWEEP_LIMIT, DEFAULT_LANGUAGE_LIMIT, DEFAULT_LEGEND } from './config.js';
 
 /** Theme identifier accepted by the `themes` input. */
 type ThemeId = 'light' | 'dark';
@@ -17,21 +19,37 @@ export interface ActionInputs {
   readonly themeIds: readonly ('light' | 'dark')[];
   readonly font: string;
   readonly monoFont: string;
+  /** Languages the languages card lists before the rest fold into "Other" (>= 1). */
+  readonly languageLimit: number;
+  /** Repositories the commit sweep visits, most recently pushed first; 0 = no cap. */
+  readonly commitSweepLimit: number;
+  /** How the magnitude ramp is labelled on the cards that draw one. */
+  readonly legend: LegendStyle;
   /** Badge brand names, trimmed and non-empty. */
   readonly badges: readonly string[];
   readonly commit: boolean;
   readonly commitMessage: string;
 }
 
-/** Cards the renderer knows how to draw. */
-const KNOWN_CARDS: readonly string[] = [
+/**
+ * Cards the renderer knows how to draw, in the order action.yml lists them.
+ *
+ * Exported so the example gallery renders exactly this set: a hand-maintained
+ * second list is a gallery that silently loses a card the day one is added.
+ */
+export const KNOWN_CARDS: readonly string[] = [
+  // Reading order, not alphabetical: who this is, whether the work is rising or
+  // falling, the last year in detail, the whole record, what the contributions
+  // are made of, when they happen, where they go, what they are written in.
   'overview',
-  'lifetime',
+  'momentum',
   'contributions',
+  'lifetime',
   'composition',
   'rhythm',
   'cadence',
   'repositories',
+  'portfolio',
   'languages',
 ];
 
@@ -88,6 +106,40 @@ function parseThemes(raw: string): ThemeId[] {
   return themes;
 }
 
+/** Parse `language-limit`: a positive integer, or the default when empty. */
+function parseLanguageLimit(raw: string): number {
+  const trimmed = raw.trim();
+  if (trimmed === '') return DEFAULT_LANGUAGE_LIMIT;
+  const value = Number(trimmed);
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error(`Invalid language-limit "${trimmed}". Expected a positive integer.`);
+  }
+  return value;
+}
+
+/** Parse `commit-sweep-limit`: a non-negative integer, or the default when empty. */
+function parseCommitSweepLimit(raw: string): number {
+  const trimmed = raw.trim();
+  if (trimmed === '') return DEFAULT_COMMIT_SWEEP_LIMIT;
+  const value = Number(trimmed);
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`Invalid commit-sweep-limit "${trimmed}". Expected a non-negative integer.`);
+  }
+  return value;
+}
+
+const LEGEND_STYLES: readonly LegendStyle[] = ['ramp', 'scale'];
+
+/** Parse `legend`: one of the known styles, or the default when empty. */
+function parseLegend(raw: string): LegendStyle {
+  const value = raw.trim().toLowerCase();
+  if (value === '') return DEFAULT_LEGEND;
+  if (value !== 'ramp' && value !== 'scale') {
+    throw new Error(`Unknown legend "${value}". Valid: ${LEGEND_STYLES.join(', ')}.`);
+  }
+  return value;
+}
+
 /** Resolve the login, falling back to the repository owner. */
 function resolveUsername(raw: string): string {
   const username = raw.trim() || process.env['GITHUB_REPOSITORY_OWNER'] || '';
@@ -115,6 +167,9 @@ export function readInputs(): ActionInputs {
   const themeIds = parseThemes(core.getInput('themes'));
   const font = core.getInput('font').trim() || DEFAULT_FONT;
   const monoFont = core.getInput('mono-font').trim() || DEFAULT_MONO_FONT;
+  const languageLimit = parseLanguageLimit(core.getInput('language-limit'));
+  const commitSweepLimit = parseCommitSweepLimit(core.getInput('commit-sweep-limit'));
+  const legend = parseLegend(core.getInput('legend'));
   const badges = core
     .getMultilineInput('badges')
     .map((name) => name.trim())
@@ -130,6 +185,9 @@ export function readInputs(): ActionInputs {
     themeIds,
     font,
     monoFont,
+    languageLimit,
+    commitSweepLimit,
+    legend,
     badges,
     commit,
     commitMessage,

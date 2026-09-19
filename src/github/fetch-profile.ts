@@ -1,7 +1,9 @@
 /** Orchestrates the API calls and normalizes them into the domain model. */
 
+import { DEFAULT_COMMIT_SWEEP_LIMIT } from '../config.js';
 import type {
   CommitSample,
+  PortfolioRepo,
   DayContribution,
   LanguageSlice,
   ProfileData,
@@ -12,12 +14,14 @@ import type {
 import { graphql } from './client.js';
 import {
   COMMITS_QUERY,
+  lifetimeCommitsQuery,
   PROFILE_QUERY,
   TRAILING_QUERY,
   YEAR_QUERY,
   type CalendarData,
   type CommitsQueryData,
   type ContributionLevelName,
+  type LifetimeCommitsQueryData,
   type ProfileQueryData,
   type TrailingQueryData,
   type YearQueryData,
@@ -43,22 +47,41 @@ function flattenCalendar(calendar: CalendarData): DayContribution[] {
 
 type RepoNode = NonNullable<ProfileQueryData['user']>['repositories']['nodes'][number];
 
-function aggregateLanguages(repos: readonly RepoNode[]): LanguageSlice[] {
-  const totals = new Map<string, { color: string | null; bytes: number }>();
-  for (const repo of repos) {
-    if (repo.isFork || repo.isArchived) continue;
+/**
+ * Sum language bytes across source repositories, keeping the bytes the edge
+ * cap left unnamed.
+ *
+ * `totalSize` counts every language in the repository; the edges only carry the
+ * largest 30. Their difference is real code with no name attached, so it is
+ * tracked separately rather than dropped — dropping it would make every
+ * percentage a share of the wrong total.
+ */
+function aggregateLanguages(repos: readonly RepoNode[]): { slices: LanguageSlice[]; tailBytes: number } {
+  const sources = repos.filter((repo) => !repo.isFork && !repo.isArchived);
+  const totals = new Map<string, { color: string | null; bytes: number; repos: number }>();
+  for (const repo of sources) {
     for (const edge of repo.languages?.edges ?? []) {
       const entry = totals.get(edge.node.name);
       if (entry) {
-        totals.set(edge.node.name, { color: entry.color ?? edge.node.color, bytes: entry.bytes + edge.size });
+        totals.set(edge.node.name, {
+          color: entry.color ?? edge.node.color,
+          bytes: entry.bytes + edge.size,
+          repos: entry.repos + 1,
+        });
       } else {
-        totals.set(edge.node.name, { color: edge.node.color, bytes: edge.size });
+        totals.set(edge.node.name, { color: edge.node.color, bytes: edge.size, repos: 1 });
       }
     }
   }
-  return [...totals.entries()]
-    .map(([name, { color, bytes }]) => ({ name, color, bytes }))
+  const tailBytes = sources.reduce((total, repo) => {
+    const edges = repo.languages?.edges ?? [];
+    const named = edges.reduce((sum, edge) => sum + edge.size, 0);
+    return total + Math.max(0, (repo.languages?.totalSize ?? named) - named);
+  }, 0);
+  const slices = [...totals.entries()]
+    .map(([name, entry]) => ({ name, color: entry.color, bytes: entry.bytes, repos: entry.repos }))
     .toSorted((a, b) => b.bytes - a.bytes || a.name.localeCompare(b.name));
+  return { slices, tailBytes };
 }
 
 /** Page through the profile query, one user snapshot per repository page. */
@@ -99,13 +122,51 @@ async function fetchRepoCommits(
   if (!history) return [];
   const samples = history.nodes.flatMap((node) => {
     const date = node.author?.date;
-    return date === null || date === undefined ? [] : [{ date, additions: node.additions, deletions: node.deletions }];
+    return date === null || date === undefined
+      ? []
+      : [
+          {
+            date,
+            additions: node.additions,
+            deletions: node.deletions,
+            changedFiles: node.changedFilesIfAvailable,
+          },
+        ];
   });
   const { pageInfo } = history;
   const rest = pageInfo.hasNextPage
     ? await fetchRepoCommits(token, owner, name, authorId, since, pageInfo.endCursor)
     : [];
   return [...samples, ...rest];
+}
+
+/**
+ * Lifetime default-branch commits by the author, one alias per repository.
+ *
+ * Returns an empty map for an empty list rather than sending a query with no
+ * selections, which the API rejects.
+ */
+async function fetchLifetimeCommits(
+  token: string,
+  authorId: string,
+  names: readonly string[]
+): Promise<Map<string, number>> {
+  if (names.length === 0) return new Map();
+  const variables: Record<string, unknown> = { authorId };
+  for (const [index, name] of names.entries()) {
+    const [owner, repo] = name.split('/');
+    variables[`o${index}`] = owner ?? '';
+    variables[`n${index}`] = repo ?? '';
+  }
+  const data = await graphql<LifetimeCommitsQueryData>(token, lifetimeCommitsQuery(names.length), variables, {
+    tolerate: ['NOT_FOUND'],
+  });
+  return new Map(
+    names.flatMap((name, index) => {
+      const total = data[`r${index}`]?.defaultBranchRef?.target?.history?.totalCount;
+      return total === undefined ? [] : [[name, total] as const];
+    })
+  );
 }
 
 /**
@@ -124,7 +185,28 @@ export function mergeDailySeries(seriesPerYear: readonly (readonly DayContributi
   return [...byDate.values()].toSorted((a, b) => a.date.localeCompare(b.date));
 }
 
-export async function fetchProfile(token: string, login: string): Promise<Omit<ProfileData, 'generatedAt'>> {
+/** How much of the per-repository commit sweep to run. */
+export interface FetchOptions {
+  /**
+   * Sweep commits at all. The sweep exists only for the cadence card, and it is
+   * the run's only cost that grows with repository count, so a run that does
+   * not render that card should not pay for it.
+   */
+  readonly sweepCommits: boolean;
+  /** Repositories the sweep visits, most recently pushed first; 0 = no cap. */
+  readonly sweepLimit: number;
+}
+
+export const DEFAULT_FETCH_OPTIONS: FetchOptions = {
+  sweepCommits: true,
+  sweepLimit: DEFAULT_COMMIT_SWEEP_LIMIT,
+};
+
+export async function fetchProfile(
+  token: string,
+  login: string,
+  options: FetchOptions = DEFAULT_FETCH_OPTIONS
+): Promise<Omit<ProfileData, 'generatedAt'>> {
   // Page through owned public repositories (1 point per page). Every page
   // repeats the user scalars; the first snapshot serves them.
   const profilePages = await fetchProfilePages(token, login, null);
@@ -173,16 +255,48 @@ export async function fetchProfile(token: string, login: string): Promise<Omit<P
   const trailing: TrailingCalendar = {
     days: flattenCalendar(trailingCalendar),
     total: trailingCalendar.totalContributions,
+    includesPrivate: trailingData.user?.contributionsCollection.hasAnyRestrictedContributions ?? false,
   };
 
   // Public repositories only, whatever token runs the generator: a PAT sees
   // private repositories in this list, and their names must not leak onto a
   // publicly served card.
-  const topRepositories: RepoCommits[] = (
-    trailingData.user?.contributionsCollection.commitContributionsByRepository ?? []
-  )
-    .filter((entry) => !entry.repository.isPrivate)
-    .map((entry) => ({ nameWithOwner: entry.repository.nameWithOwner, commits: entry.contributions.totalCount }));
+  // Issues are keyed by repository name so the ranking can carry them without
+  // a second ordering; the privacy filter applies here for the same reason it
+  // applies to commits.
+  const issuesByRepo = new Map(
+    (trailingData.user?.contributionsCollection.issueContributionsByRepository ?? [])
+      .filter((entry) => !entry.repository.isPrivate)
+      .map((entry) => [entry.repository.nameWithOwner, entry.contributions.totalCount])
+  );
+
+  const rankedRepos = (trailingData.user?.contributionsCollection.commitContributionsByRepository ?? []).filter(
+    (entry) => !entry.repository.isPrivate
+  );
+
+  // One aliased selection per repository, in one request. Aliases resolve
+  // independently, so a repository that vanished since the trailing query
+  // fails only its own alias.
+  const lifetimeCommits = await fetchLifetimeCommits(
+    token,
+    user.id,
+    rankedRepos.map((entry) => entry.repository.nameWithOwner)
+  );
+
+  const topRepositories: RepoCommits[] = rankedRepos.map((entry) => ({
+    nameWithOwner: entry.repository.nameWithOwner,
+    commits: entry.contributions.totalCount,
+    issues: issuesByRepo.get(entry.repository.nameWithOwner) ?? 0,
+    lifetimeCommits: lifetimeCommits.get(entry.repository.nameWithOwner) ?? 0,
+    language: entry.repository.primaryLanguage,
+    stars: entry.repository.stargazerCount,
+  }));
+
+  const popular = trailingData.user?.contributionsCollection.popularPullRequestContribution?.pullRequest;
+  const popularPullRequest =
+    popular === undefined || popular.repository.isPrivate
+      ? null
+      : { title: popular.title, nameWithOwner: popular.repository.nameWithOwner };
 
   const trailingCollection = trailingData.user?.contributionsCollection;
   const trailingCommits = {
@@ -198,13 +312,40 @@ export async function fetchProfile(token: string, login: string): Promise<Omit<P
   const lifetimeDays = mergeDailySeries(dailySeries).filter((day) => day.date <= today);
 
   const sourceRepos = repoNodes.filter((repo) => !repo.isFork && !repo.isArchived);
+  const languages = aggregateLanguages(repoNodes);
+
+  const portfolio: PortfolioRepo[] = sourceRepos
+    .map((repo) => ({
+      nameWithOwner: repo.nameWithOwner,
+      createdAt: repo.createdAt,
+      pushedAt: repo.pushedAt,
+      commits: repo.defaultBranchRef?.target?.history?.totalCount ?? 0,
+      language: repo.primaryLanguage,
+      stars: repo.stargazerCount,
+      diskUsageKb: repo.diskUsage ?? 0,
+      license: repo.licenseInfo?.spdxId ?? null,
+    }))
+    .toSorted((a, b) => b.commits - a.commits || a.nameWithOwner.localeCompare(b.nameWithOwner));
 
   // Sweep commits the user authored across owned source repositories over the
   // trailing 365 days — one paginated 1-point query per repository, fanned out
-  // like the year queries. This powers the cadence card.
+  // like the year queries. This powers the cadence card, and it is the only
+  // part of a run whose cost grows with the number of repositories owned.
   const since = new Date(Date.now() - 365 * 86_400_000).toISOString();
+  // `pushedAt` is an upper bound on every commit date in the repository, so a
+  // repository last pushed before the window cannot hold a commit inside it:
+  // dropping it removes a query without dropping a sample. Newest first, so a
+  // cap keeps the repositories most likely to carry commits.
+  const sweepCandidates = sourceRepos
+    .filter((repo) => repo.pushedAt !== null && repo.pushedAt >= since)
+    .toSorted((a, b) => (b.pushedAt ?? '').localeCompare(a.pushedAt ?? ''));
+  const swept = !options.sweepCommits
+    ? []
+    : options.sweepLimit > 0
+      ? sweepCandidates.slice(0, options.sweepLimit)
+      : sweepCandidates;
   const commits = (
-    await Promise.all(sourceRepos.map((repo) => fetchRepoCommits(token, login, repo.name, user.id, since)))
+    await Promise.all(swept.map((repo) => fetchRepoCommits(token, login, repo.name, user.id, since)))
   ).flat();
 
   return {
@@ -216,12 +357,17 @@ export async function fetchProfile(token: string, login: string): Promise<Omit<P
     mergedPullRequests: user.mergedPullRequests.totalCount,
     issues: user.issues.totalCount,
     contributedTo: user.repositoriesContributedTo.totalCount,
-    languages: aggregateLanguages(repoNodes),
+    languages: languages.slices,
+    languageTailBytes: languages.tailBytes,
     years: yearActivities,
+    includesPrivate: yearActivities.some((year) => year.restricted > 0),
     lifetimeDays,
     trailing,
     commits,
+    commitSweep: { swept: swept.length, candidates: sweepCandidates.length },
     topRepositories,
+    popularPullRequest,
+    repositories: portfolio,
     trailingCommits,
   };
 }

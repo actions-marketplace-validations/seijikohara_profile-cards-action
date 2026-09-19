@@ -13,16 +13,18 @@ Profile READMEs usually rely on third-party image services that fetch your stats
 
 Each requested card is rendered per theme into `<output-dir>/` as `<card>.<theme>.svg`. Optional badge pills are rendered into `<output-dir>/badges/` as `<slug>.<theme>.svg`, using [simple-icons](https://simpleicons.org/) for brand glyphs when a match exists and falling back to text-only pills otherwise.
 
-| Card            | Shows                                                                                                                                                       |
-| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `overview`      | Eight stat tiles: lifetime and current-year contributions, stars, followers, merged PRs, issues, public repositories, recently contributed-to repositories. |
-| `lifetime`      | Contribution history — one row per year since the first contribution, each week shaded by activity.                                                         |
-| `contributions` | Current and longest streaks, plus the trailing 12 months as an isometric 3D calendar.                                                                       |
-| `composition`   | Per-year stacked bars of commits, pull requests, issues, reviews, and private contributions, with the overall private share.                                |
-| `rhythm`        | Contributions by weekday and by month of the year.                                                                                                          |
-| `cadence`       | Weekday × hour punch card of commits on owned default branches over the trailing year, in author-local time, with volume stats.                             |
-| `repositories`  | Top public repositories by commits over the trailing year — including repositories the user does not own — as a ranked bar list.                            |
-| `languages`     | A treemap of languages by bytes across public source repositories, with a labeled legend.                                                                   |
+| Card            | Shows                                                                                                                                                                                                                                                                                       |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `overview`      | Eight stat tiles: lifetime and current-year contributions, stars, followers, merged PRs, issues, public repositories, recently contributed-to repositories. Counters with a per-year series carry a sparkline, and the current year carries its change against the same window a year back. |
+| `momentum`      | Contributions in each trailing twelve months, sampled weekly across the whole account history — the one chart here that can fall.                                                                                                                                                           |
+| `contributions` | Current and longest streaks, plus the trailing 12 months as an isometric 3D calendar.                                                                                                                                                                                                       |
+| `lifetime`      | Contribution history — one row per year since the first contribution, each week shaded by activity.                                                                                                                                                                                         |
+| `composition`   | Per-year stacked bars of commits, pull requests, issues, reviews, and private contributions, with the overall private share.                                                                                                                                                                |
+| `rhythm`        | Contributions of every type by weekday and by month of the year, each bar marked with where the trailing year sits in its own panel.                                                                                                                                                        |
+| `cadence`       | Weekday × hour punch card of commits on owned default branches over the trailing year, in author-local time, with an hour-of-day histogram and a commit-size distribution.                                                                                                                  |
+| `repositories`  | Top public repositories by commits over the trailing year — including repositories the user does not own — as a ranked bar list with language, stars, issues opened, and each bar set against the repository's whole history.                                                               |
+| `portfolio`     | One lifeline per owned public source repository — created to last push on a shared time axis, with language, commit count, and license.                                                                                                                                                     |
+| `languages`     | A treemap of languages by bytes across public source repositories, beside a ranked list showing how many repositories each one turns up in. `language-limit` sets how many are listed.                                                                                                      |
 
 Cards are drawn at the 846px width of the profile README column, use GitHub's Primer color tokens so they blend into both themes, animate only on entry (CSS only, disabled under `prefers-reduced-motion`), and contain no scripts or external references.
 
@@ -39,11 +41,11 @@ Each sample is wrapped in a `<picture>`, so the card you see matches your GitHub
   <img alt="Overview card: lifetime and current-year contributions, stars, followers, merged pull requests, issues, repositories" src="examples/overview.light.svg" width="100%" />
 </picture>
 
-**`lifetime`** — one shaded row per contribution year
+**`momentum`** — the trailing twelve months, rolled across the whole history
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="examples/lifetime.dark.svg" />
-  <img alt="Lifetime card: contribution history with one row per year, each week shaded by activity" src="examples/lifetime.light.svg" width="100%" />
+  <source media="(prefers-color-scheme: dark)" srcset="examples/momentum.dark.svg" />
+  <img alt="Momentum card: contributions in each trailing twelve months, sampled weekly since the first contribution" src="examples/momentum.light.svg" width="100%" />
 </picture>
 
 **`contributions`** — streaks and an isometric trailing year
@@ -51,6 +53,13 @@ Each sample is wrapped in a `<picture>`, so the card you see matches your GitHub
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="examples/contributions.dark.svg" />
   <img alt="Contributions card: current and longest streaks above a 3D calendar of the trailing 12 months" src="examples/contributions.light.svg" width="100%" />
+</picture>
+
+**`lifetime`** — one shaded row per contribution year
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="examples/lifetime.dark.svg" />
+  <img alt="Lifetime card: contribution history with one row per year, each week shaded by activity" src="examples/lifetime.light.svg" width="100%" />
 </picture>
 
 **`composition`** — what the contributions are made of
@@ -64,30 +73,35 @@ Each sample is wrapped in a `<picture>`, so the card you see matches your GitHub
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="examples/rhythm.dark.svg" />
-  <img alt="Rhythm card: contributions by weekday and by month of the year" src="examples/rhythm.light.svg" width="100%" />
+  <img alt="Rhythm card: contributions of every type by weekday and by month of the year" src="examples/rhythm.light.svg" width="100%" />
 </picture>
 
 **`cadence`** — when the commits land, hour by hour
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="examples/cadence.dark.svg" />
-  <img alt="Cadence card: commits by weekday and hour of day over the trailing year" src="examples/cadence.light.svg" width="100%" />
+  <img alt="Cadence card: commits by weekday and hour of day over the trailing year, with an hour-of-day histogram" src="examples/cadence.light.svg" width="100%" />
 </picture>
-
-Hours come from each commit's author-local timezone offset, so the card needs no timezone configuration. Commits created through the GitHub web UI are recorded in UTC.
 
 **`repositories`** — where the commits went
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="examples/repositories.dark.svg" />
-  <img alt="Repositories card: top repositories ranked by commits over the trailing year" src="examples/repositories.light.svg" width="100%" />
+  <img alt="Repositories card: top repositories ranked by commits over the trailing year, with primary language and stars" src="examples/repositories.light.svg" width="100%" />
 </picture>
 
-**`languages`** — language treemap by bytes
+**`portfolio`** — a lifeline per repository on one time axis
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="examples/portfolio.dark.svg" />
+  <img alt="Portfolio card: one lifeline per owned public source repository, from creation to last push, with language, commit count, and license" src="examples/portfolio.light.svg" width="100%" />
+</picture>
+
+**`languages`** — language treemap by bytes, with a ranked list
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="examples/languages.dark.svg" />
-  <img alt="Languages card: treemap of languages by bytes across public source repositories, with a labeled legend" src="examples/languages.light.svg" width="100%" />
+  <img alt="Languages card: treemap of languages by bytes beside a ranked list, across public source repositories" src="examples/languages.light.svg" width="100%" />
 </picture>
 
 Badge pills render at their natural size. `GitHub`, `TypeScript`, and `npm` match a simple-icons glyph; `Findy` has none, so it falls back to a text-only pill:
@@ -136,7 +150,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           username: seijikohara
-          cards: overview,lifetime,contributions,composition,rhythm,cadence,repositories,languages
+          cards: overview,momentum,contributions,lifetime,composition,rhythm,cadence,repositories,portfolio,languages
           output-dir: assets
           themes: light,dark
           commit: true
@@ -162,18 +176,21 @@ Badge SVGs carry no links — wrap each one in an `<a href="...">` in your READM
 
 ## Inputs
 
-| Input            | Description                                                                                                                                       | Required | Default                                                                             |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ----------------------------------------------------------------------------------- |
-| `github-token`   | Token for the GitHub GraphQL API and, when committing, for pushing generated files.                                                               | `true`   | —                                                                                   |
-| `username`       | GitHub login to render. Defaults to the repository owner (`GITHUB_REPOSITORY_OWNER`).                                                             | `false`  | `''`                                                                                |
-| `cards`          | Cards to render (comma/space/newline separated).                                                                                                  | `false`  | `overview,lifetime,contributions,composition,rhythm,cadence,repositories,languages` |
-| `output-dir`     | Directory to write card SVGs into.                                                                                                                | `false`  | `assets`                                                                            |
-| `themes`         | Themes to render (comma separated): `light`, `dark`.                                                                                              | `false`  | `light,dark`                                                                        |
-| `font`           | Google Fonts sans-serif family. Roboto and Roboto Mono are bundled; other families are fetched at runtime.                                        | `false`  | `Roboto`                                                                            |
-| `mono-font`      | Google Fonts monospace family.                                                                                                                    | `false`  | `Roboto Mono`                                                                       |
-| `badges`         | Newline-separated brand names to render as badge pills (icon via simple-icons when available, else text-only). Written to `<output-dir>/badges/`. | `false`  | `''`                                                                                |
-| `commit`         | Commit changed files back to the repository.                                                                                                      | `false`  | `true`                                                                              |
-| `commit-message` | Commit subject used when `commit` is true.                                                                                                        | `false`  | `chore(profile): refresh generated cards [skip ci]`                                 |
+| Input                | Description                                                                                                                                                                                  | Required | Default                                                                                                |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------ |
+| `github-token`       | Token for the GitHub GraphQL API and, when committing, for pushing generated files.                                                                                                          | `true`   | —                                                                                                      |
+| `username`           | GitHub login to render. Defaults to the repository owner (`GITHUB_REPOSITORY_OWNER`).                                                                                                        | `false`  | `''`                                                                                                   |
+| `cards`              | Cards to render (comma/space/newline separated).                                                                                                                                             | `false`  | `overview,momentum,contributions,lifetime,composition,rhythm,cadence,repositories,portfolio,languages` |
+| `output-dir`         | Directory to write card SVGs into.                                                                                                                                                           | `false`  | `assets`                                                                                               |
+| `themes`             | Themes to render (comma separated): `light`, `dark`.                                                                                                                                         | `false`  | `light,dark`                                                                                           |
+| `font`               | Google Fonts sans-serif family. Roboto and Roboto Mono are bundled; other families are fetched at runtime.                                                                                   | `false`  | `Roboto`                                                                                               |
+| `mono-font`          | Google Fonts monospace family.                                                                                                                                                               | `false`  | `Roboto Mono`                                                                                          |
+| `language-limit`     | Languages the `languages` card lists before the rest fold into "Other". The card grows one row per language.                                                                                 | `false`  | `8`                                                                                                    |
+| `legend`             | How cards label the green magnitude ramp: `ramp` keeps the calendar's Less…More key, `scale` prints the value band each step stands for. Affects `contributions`, `lifetime`, and `cadence`. | `false`  | `ramp`                                                                                                 |
+| `commit-sweep-limit` | Repositories the `cadence` card's commit sweep visits, most recently pushed first. `0` visits every repository that could hold a commit in the trailing year.                                | `false`  | `0`                                                                                                    |
+| `badges`             | Newline-separated brand names to render as badge pills (icon via simple-icons when available, else text-only). Written to `<output-dir>/badges/`.                                            | `false`  | `''`                                                                                                   |
+| `commit`             | Commit changed files back to the repository.                                                                                                                                                 | `false`  | `true`                                                                                                 |
+| `commit-message`     | Commit subject used when `commit` is true.                                                                                                                                                   | `false`  | `chore(profile): refresh generated cards [skip ci]`                                                    |
 
 ## Outputs
 
@@ -185,10 +202,31 @@ Badge SVGs carry no links — wrap each one in an `<a href="...">` in your READM
 ## How It Works
 
 1. **Fetch** — Query the GitHub GraphQL API for the target user's profile, contribution calendar, and repository language statistics, and sweep the commits the user authored on owned default branches over the trailing year (the cadence card's data). The queries are split (one per contribution year, one paginated query per swept repository) to stay far under the API's per-query resource limits.
+
+   The sweep is the only part of a run whose cost grows with the number of repositories owned, so it is bounded twice. A repository whose last push predates the window cannot hold a commit inside it and is skipped, which costs nothing in accuracy; `commit-sweep-limit` caps what remains, and the card then discloses how many repositories it actually read. Dropping `cadence` from `cards` skips the sweep entirely.
+
 2. **Resolve fonts** — Build the `@font-face` rules the cards reference (see [Fonts](#fonts)).
 3. **Render** — Draw each requested card to SVG for every requested theme, embedding the fonts as Base64 data URIs so the cards need no external resources.
 4. **Write** — Emit the SVGs into `output-dir` (and any badge pills into `output-dir/badges/`).
 5. **Commit** — When `commit` is enabled, commit and push the changed files using `commit-message`, and report the `changed` / `files` outputs. If the branch advanced mid-run and the push is rejected, the freshly rendered output is re-committed onto the new tip and pushed again; if that tip already carries identical output, the run reports no change instead.
+
+### Reading the ramp
+
+Every card that answers "how much" fills from GitHub's own contribution green, so the deck reads as one system. What a given shade is _worth_, though, differs per card and is invisible by default.
+
+Set `legend: scale` to replace the `Less … More` key with the value band each step covers, in the unit that card counts:
+
+```
+per week   0    1–14   15–20   21–25   26+
+per day    0    1–7    8–22    —       23+
+per slot   0    1–3    4–6     7–11    12+
+```
+
+The bounds are the ones each card already computes to level its own data — quartiles of weekly sums for `lifetime`, GitHub's own daily quartiles for `contributions`, quartiles of weekday-hour cells for `cadence`. A band nobody reached prints as a dash rather than as a range starting at zero.
+
+### Private contributions
+
+GitHub counts private ("restricted") contributions in a profile's calendar only when the profile enables **Include private contributions on my profile**. The two numbers look identical on a card, so `lifetime`, `contributions`, and `composition` state which one they drew — `INCL. PRIVATE` or `PUBLIC ONLY` — in the note beside the title. The disclosure describes what was _counted_: the action never reads private repositories, and how much private work stays restricted depends on the token.
 
 ## Fonts
 

@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
+import { renderCadence } from '../src/cards/cadence.js';
 import { computeCadence } from '../src/compute/cadence.js';
 import { range } from '../src/iter.js';
-import type { CommitSample } from '../src/model.js';
+import type { CommitSample, ProfileData } from '../src/model.js';
+import { LIGHT } from '../src/theme.js';
+import { makeFixture } from './fixture.js';
 
-function commit(date: string, additions = 0, deletions = 0): CommitSample {
-  return { date, additions, deletions };
+function commit(date: string, additions = 0, deletions = 0, changedFiles: number | null = 1): CommitSample {
+  return { date, additions, deletions, changedFiles };
 }
 
 describe('computeCadence', () => {
@@ -115,5 +118,69 @@ describe('computeCadence', () => {
     expect(() => computeCadence([commit('2026-08-17 08:00:00')])).toThrow('invalid commit date');
     expect(() => computeCadence([commit('2026-08-17T25:00:00Z')])).toThrow('invalid commit date');
     expect(() => computeCadence([commit('2026-13-01T08:00:00Z')])).toThrow('invalid commit date');
+  });
+});
+
+describe('computeCadence commit size', () => {
+  it('buckets commits by lines changed, log-spaced', () => {
+    const result = computeCadence([
+      commit('2026-08-17T10:00:00Z', 0, 0),
+      commit('2026-08-17T10:00:00Z', 3, 2),
+      commit('2026-08-17T10:00:00Z', 50, 5),
+      commit('2026-08-17T10:00:00Z', 500, 100),
+      commit('2026-08-17T10:00:00Z', 2000, 0),
+    ]);
+    expect(result.sizeBuckets).toEqual([1, 1, 1, 1, 1]);
+  });
+
+  it('puts a commit on the boundary in the higher bucket', () => {
+    expect(computeCadence([commit('2026-08-17T10:00:00Z', 10, 0)]).sizeBuckets).toEqual([0, 0, 1, 0, 0]);
+    expect(computeCadence([commit('2026-08-17T10:00:00Z', 9, 0)]).sizeBuckets).toEqual([0, 1, 0, 0, 0]);
+  });
+
+  it('divides lines by files, skipping commits with no computed diff', () => {
+    const result = computeCadence([
+      commit('2026-08-17T10:00:00Z', 100, 0, 10), // 10 per file
+      commit('2026-08-17T10:00:00Z', 60, 0, 2), //  30 per file
+      commit('2026-08-17T10:00:00Z', 900, 0, null), // no file count: ignored
+    ]);
+    expect(result.medianLinesPerFile).toBe(20);
+  });
+
+  it('has no per-file median when nothing reported a file count', () => {
+    expect(computeCadence([commit('2026-08-17T10:00:00Z', 5, 5, null)]).medianLinesPerFile).toBeUndefined();
+  });
+
+  it('reports a median commit size that one huge commit cannot move', () => {
+    const commits = [
+      commit('2026-08-17T10:00:00Z', 10, 0),
+      commit('2026-08-17T10:00:00Z', 20, 0),
+      commit('2026-08-17T10:00:00Z', 1_000_000, 0),
+    ];
+    expect(computeCadence(commits).medianLines).toBe(20);
+  });
+
+  it('reports no medians and empty buckets without commits', () => {
+    const result = computeCadence([]);
+    expect(result.sizeBuckets).toEqual([0, 0, 0, 0, 0]);
+    expect(result.medianLines).toBeUndefined();
+  });
+});
+
+describe('renderCadence sweep disclosure', () => {
+  const fixture: ProfileData = makeFixture();
+
+  it('says nothing about scope when the sweep visited every candidate', () => {
+    const svg = renderCadence({ ...fixture, commitSweep: { swept: 18, candidates: 18 } }, LIGHT, '');
+    expect(svg).toContain('TRAILING 12 MONTHS · AUTHOR LOCAL TIME');
+    expect(svg).not.toContain('REPOSITORIES');
+    expect(svg).toContain('commits');
+    expect(svg).not.toContain('commits swept');
+  });
+
+  it('names the shortfall and softens the count when the cap bit', () => {
+    const svg = renderCadence({ ...fixture, commitSweep: { swept: 5, candidates: 18 } }, LIGHT, '');
+    expect(svg).toContain('5 OF 18 REPOSITORIES');
+    expect(svg).toContain('commits swept');
   });
 });

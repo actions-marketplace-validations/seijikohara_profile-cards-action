@@ -1,6 +1,18 @@
-/** Languages card: a squarified treemap by bytes with a full-coverage legend. */
+/**
+ * Languages card: a squarified treemap beside a ranked list, both by bytes.
+ *
+ * The treemap is the figure and the list is its key, so the list sits to the
+ * right where a chart legend belongs — the figure is read first, the key when
+ * a reader needs it. One row per language, top to bottom in size order, so the
+ * ranking is legible without decoding cell areas: the legend this replaced ran
+ * across three columns before wrapping, which put rank 4 below rank 1.
+ *
+ * The list is exhaustive by construction, so the treemap grows to whatever
+ * height it needs; `languageLimit` decides how many languages are listed before
+ * the rest fold into "Other".
+ */
 
-import { CARD_PADDING, CARD_WIDTH } from '../config.js';
+import { CARD_PADDING, CARD_WIDTH, DEFAULT_LANGUAGE_LIMIT } from '../config.js';
 import { languageShares, type LanguageShare } from '../compute/languages.js';
 import type { TreemapRect } from '../compute/treemap.js';
 import { squarify } from '../compute/treemap.js';
@@ -10,20 +22,42 @@ import { formatBytes, formatInt } from '../svg/text.js';
 import { contrast, type Theme } from '../theme.js';
 import { cardFrame } from './frame.js';
 
-const TREE_TOP = 60;
-const TREE_HEIGHT = 190;
-const LEGEND_TOP_GAP = 30;
-const LEGEND_COLUMNS = 3;
-const LEGEND_ROW_HEIGHT = 30;
+const CONTENT_TOP = 60;
+
+// Left column: the treemap. It sets the card's height, growing to match the
+// list so a long list never leaves the figure stranded at the top.
+const COLUMN_GAP = 20;
+const LIST_WIDTH = 300;
+const TREE_X = CARD_PADDING;
+const TREE_WIDTH = CARD_WIDTH - CARD_PADDING * 2 - LIST_WIDTH - COLUMN_GAP;
+const TREE_MIN_HEIGHT = 250;
+
+// Right column: the ranked list, closing flush with the card's right padding.
+const LIST_X = TREE_X + TREE_WIDTH + COLUMN_GAP;
+const LIST_ROW_HEIGHT = 27;
+const LIST_HEAD_BASELINE = CONTENT_TOP - 3;
+const LIST_FIRST_BASELINE = CONTENT_TOP + 15;
+const LIST_NAME_X = LIST_X + 18;
+const LIST_REPOS_RIGHT = LIST_X + 152;
+const LIST_BYTES_RIGHT = LIST_X + 226;
+const LIST_PCT_RIGHT = LIST_X + LIST_WIDTH;
 
 // In-cell label tiers by cell height (at LABEL_MIN_WIDTH or wider): the name
 // needs ~26px, the percentage line ~44px, the bytes line ~64px. Every tier's
-// last baseline clears the cell bottom — the old single 30px threshold let the
-// percentage baseline (y+34) fall outside the cell and clip.
+// last baseline clears the cell bottom.
 const LABEL_MIN_WIDTH = 54;
 const NAME_MIN_HEIGHT = 26;
 const PCT_MIN_HEIGHT = 44;
 const BYTES_MIN_HEIGHT = 64;
+
+/**
+ * Percentage label. A share below 0.05% rounds to "0.0%", which reads as
+ * "none" for a language the card is in the middle of listing — say "<0.1%"
+ * instead. The stored value stays 0.0 so the shares still sum to exactly 100.0.
+ */
+function pctLabel(share: LanguageShare): string {
+  return share.pct === 0 && share.bytes > 0 ? '<0.1%' : `${share.pct.toFixed(1)}%`;
+}
 
 /** Fill for a share: its linguist color, or the muted token for "Other" and colorless languages. */
 function cellFill(share: LanguageShare, theme: Theme): string {
@@ -39,7 +73,7 @@ function cellLabel(share: LanguageShare, rect: TreemapRect, fill: string): strin
   return [
     el('text', { x: tx, y: rect.y + 20, class: 'lang', fill: ink }, textNode(share.name)),
     ...(rect.height >= PCT_MIN_HEIGHT
-      ? [el('text', { x: tx, y: rect.y + 34, class: 'lang-pct', fill: ink }, textNode(`${share.pct.toFixed(1)}%`))]
+      ? [el('text', { x: tx, y: rect.y + 34, class: 'lang-pct', fill: ink }, textNode(pctLabel(share)))]
       : []),
     ...(rect.height >= BYTES_MIN_HEIGHT
       ? [el('text', { x: tx, y: rect.y + 50, class: 'lang-pct', fill: ink }, textNode(formatBytes(share.bytes)))]
@@ -47,8 +81,13 @@ function cellLabel(share: LanguageShare, rect: TreemapRect, fill: string): strin
   ].join('');
 }
 
-export function renderLanguages(data: ProfileData, theme: Theme, fontFaceCss: string): string {
-  const shares = languageShares(data.languages);
+export function renderLanguages(
+  data: ProfileData,
+  theme: Theme,
+  fontFaceCss: string,
+  languageLimit: number = DEFAULT_LANGUAGE_LIMIT
+): string {
+  const shares = languageShares(data.languages, languageLimit, data.languageTailBytes);
 
   if (shares.length === 0) {
     return cardFrame(
@@ -63,13 +102,13 @@ export function renderLanguages(data: ProfileData, theme: Theme, fontFaceCss: st
     );
   }
 
-  const inner = CARD_WIDTH - CARD_PADDING * 2;
+  const treeHeight = Math.max(TREE_MIN_HEIGHT, shares.length * LIST_ROW_HEIGHT);
   const rects = squarify(
     shares.map((share) => share.bytes),
-    CARD_PADDING,
-    TREE_TOP,
-    inner,
-    TREE_HEIGHT
+    TREE_X,
+    CONTENT_TOP,
+    TREE_WIDTH,
+    treeHeight
   );
 
   // One faded, staggered group per cell: an inset rounded rect (the 1px inset on
@@ -88,48 +127,58 @@ export function renderLanguages(data: ProfileData, theme: Theme, fontFaceCss: st
       fill,
     });
 
-    const label = cellLabel(share, rect, fill);
-
-    return el('g', { class: `fade c${rect.index}` }, rectEl, label);
+    return el('g', { class: `fade c${rect.index}` }, rectEl, cellLabel(share, rect, fill));
   });
 
-  // Legend lists every share, so each name and percentage appears regardless of
-  // how small its treemap cell is.
-  const legendTop = TREE_TOP + TREE_HEIGHT + LEGEND_TOP_GAP;
-  const columnWidth = inner / LEGEND_COLUMNS;
-  const legend = shares.map((share, index) => {
-    const column = index % LEGEND_COLUMNS;
-    const row = Math.floor(index / LEGEND_COLUMNS);
-    const x = CARD_PADDING + column * columnWidth;
-    const y = legendTop + row * LEGEND_ROW_HEIGHT;
+  // The ranked list covers every share, so each name, size, and percentage
+  // appears however small its treemap cell turns out to be.
+  const list = shares.map((share, index) => {
+    const y = LIST_FIRST_BASELINE + index * LIST_ROW_HEIGHT;
     return el(
       'g',
       {},
-      el('circle', { cx: x + 5, cy: y - 4, r: 5, fill: cellFill(share, theme) }),
-      el('text', { x: x + 18, y, class: 'leg-name' }, textNode(share.name)),
+      el('circle', { cx: LIST_X + 5, cy: y - 4, r: 5, fill: cellFill(share, theme) }),
+      el('text', { x: LIST_NAME_X, y, class: 'leg-name' }, textNode(share.name)),
+      // Reach, not rank: how many repositories the language turns up in, which
+      // is the cheapest corrective to bytes-on-disk as a measure of effort.
       el(
         'text',
-        { x: x + columnWidth - 70, y, class: 't-tick', 'text-anchor': 'end' },
-        textNode(formatBytes(share.bytes))
+        { x: LIST_REPOS_RIGHT, y, class: 't-tick', 'text-anchor': 'end' },
+        textNode(share.repos === 0 ? '—' : String(share.repos))
       ),
-      el(
-        'text',
-        { x: x + columnWidth - 16, y, class: 't-tick', 'text-anchor': 'end' },
-        textNode(`${share.pct.toFixed(1)}%`)
-      )
+      el('text', { x: LIST_BYTES_RIGHT, y, class: 't-tick', 'text-anchor': 'end' }, textNode(formatBytes(share.bytes))),
+      el('text', { x: LIST_PCT_RIGHT, y, class: 't-tick', 'text-anchor': 'end' }, textNode(pctLabel(share)))
     );
   });
 
-  const legendRows = Math.ceil(shares.length / LEGEND_COLUMNS);
-  const legendBottom = legendTop + (legendRows - 1) * LEGEND_ROW_HEIGHT;
+  // Column heads: a bare count needs naming, and the other two columns are
+  // only self-evident once one of them is not.
+  const listHead =
+    el('text', { x: LIST_NAME_X, y: LIST_HEAD_BASELINE, class: 't-mono' }, textNode('LANGUAGE')) +
+    el(
+      'text',
+      { x: LIST_REPOS_RIGHT, y: LIST_HEAD_BASELINE, class: 't-mono', 'text-anchor': 'end' },
+      textNode('REPOS')
+    ) +
+    el(
+      'text',
+      { x: LIST_BYTES_RIGHT, y: LIST_HEAD_BASELINE, class: 't-mono', 'text-anchor': 'end' },
+      textNode('BYTES')
+    ) +
+    el('text', { x: LIST_PCT_RIGHT, y: LIST_HEAD_BASELINE, class: 't-mono', 'text-anchor': 'end' }, textNode('SHARE'));
+
+  const contentBottom = CONTENT_TOP + treeHeight;
 
   // Footer: the population the treemap slices — counts before Other-folding.
-  const totalBytes = data.languages.reduce((sum, slice) => sum + slice.bytes, 0);
-  const footerBaseline = legendBottom + 30;
+  // The named languages are a floor, not a census: bytes past the query's
+  // per-repository cap are counted but unnamed, so the count carries a "+".
+  const totalBytes = data.languages.reduce((sum, slice) => sum + slice.bytes, 0) + data.languageTailBytes;
+  const languageCount = `${data.languages.length}${data.languageTailBytes > 0 ? '+' : ''}`;
+  const footerBaseline = contentBottom + 28;
   const footer = el(
     'text',
     { x: CARD_PADDING, y: footerBaseline, class: 't-label' },
-    el('tspan', { class: 't-stat' }, textNode(String(data.languages.length))),
+    el('tspan', { class: 't-stat' }, textNode(languageCount)),
     textNode(' languages across '),
     el('tspan', { class: 't-stat' }, textNode(formatInt(data.publicSourceRepos))),
     textNode(' source repositories · '),
@@ -164,6 +213,6 @@ export function renderLanguages(data: ProfileData, theme: Theme, fontFaceCss: st
       fontFaceCss,
     },
     ...cells,
-    el('g', { class: 'fade' }, ...legend, footer)
+    el('g', { class: 'fade' }, listHead, ...list, footer)
   );
 }

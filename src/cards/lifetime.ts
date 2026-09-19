@@ -11,12 +11,14 @@
 
 import { computeLifetime } from '../compute/lifetime.js';
 import { range } from '../iter.js';
-import { CARD_PADDING, CARD_WIDTH } from '../config.js';
+import type { LegendStyle } from '../cards.js';
+import { CARD_PADDING, CARD_WIDTH, DEFAULT_LEGEND } from '../config.js';
 import type { ProfileData } from '../model.js';
 import { el, textNode } from '../svg/dsl.js';
 import { formatInt } from '../svg/text.js';
 import type { Theme } from '../theme.js';
 import { cardFrame } from './frame.js';
+import { privacyNote, rampLegend, RAMP_SCALE_ROW } from './legend.js';
 
 /** Top-axis month labels, placed by week ≈ month * COLS / 12. */
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
@@ -42,8 +44,15 @@ const LEGEND_ROW = 26; // "Less" … swatches … "More"
 const COL_STEP_MS = 16;
 const SWEEP_MS = 900;
 
-export function renderLifetime(data: ProfileData, theme: Theme, fontFaceCss: string): string {
+export function renderLifetime(
+  data: ProfileData,
+  theme: Theme,
+  fontFaceCss: string,
+  legendStyle: LegendStyle = DEFAULT_LEGEND
+): string {
   const life = computeLifetime(data.lifetimeDays);
+  // The heatmap levels weekly sums, so its scale counts contributions per week.
+  const scale = legendStyle === 'scale' ? { thresholds: life.thresholds, unit: 'per week' } : undefined;
   const rows = life.years.length;
 
   // Defensive clamp: contribRamp is a 5-tuple, so the index must stay in 0..4
@@ -63,7 +72,7 @@ export function renderLifetime(data: ProfileData, theme: Theme, fontFaceCss: str
   // Vertical frame: one row per year, height summed from the named bands.
   const gridTop = TITLE_AREA + MONTH_ROW;
   const gridBottom = gridTop + rows * ROW_PITCH;
-  const height = gridBottom + LEGEND_ROW + CARD_PADDING;
+  const height = gridBottom + LEGEND_ROW + (scale === undefined ? 0 : RAMP_SCALE_ROW) + CARD_PADDING;
 
   // Draw column-major so each week column is one animated group; a year shorter
   // than the widest simply contributes no cell past its last week.
@@ -131,31 +140,26 @@ export function renderLifetime(data: ProfileData, theme: Theme, fontFaceCss: str
     )
   );
 
-  // Legend: "Less", the five ramp swatches, then "More" — no arrow glyph.
+  // Legend: "Less", the five ramp swatches, then "More" — no arrow glyph. The
+  // swatches copy the wall's own cell, so the key and the data share a shape.
   const legendY = gridBottom + 17;
-  const swatchLeft = CARD_PADDING + 34;
-  const swatchPitch = CELL_H + 4;
-  const swatches = theme.contribRamp.map((color, i) =>
-    el('rect', {
-      x: swatchLeft + i * swatchPitch,
-      y: legendY - 9,
-      width: CELL_H,
-      height: CELL_H,
-      rx: CELL_RADIUS,
-      fill: color,
-    })
-  );
-  const legend =
-    el('text', { x: CARD_PADDING, y: legendY, class: 't-tick' }, textNode('Less')) +
-    swatches.join('') +
-    el(
-      'text',
-      { x: swatchLeft + theme.contribRamp.length * swatchPitch + 4, y: legendY, class: 't-tick' },
-      textNode('More')
-    );
+  const legend = rampLegend(theme, CARD_PADDING, legendY, {
+    ...(scale === undefined ? {} : { scale }),
+    pitch: CELL_H + 4,
+    swatch: (color, _level, cx, cy) =>
+      el('rect', {
+        x: cx - CELL_H / 2,
+        y: cy - CELL_H / 2,
+        width: CELL_H,
+        height: CELL_H,
+        rx: CELL_RADIUS,
+        fill: color,
+      }),
+  });
 
   const firstYear = life.years[0]?.year;
-  const note = firstYear === undefined ? 'no activity yet · by week' : `${firstYear}–present · by week`;
+  const privacy = privacyNote(data.includesPrivate);
+  const note = firstYear === undefined ? 'no activity yet · by week' : `${firstYear}–present · by week · ${privacy}`;
   const description =
     firstYear === undefined
       ? `Contribution history for ${data.login}: no activity yet.`

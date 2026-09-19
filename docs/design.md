@@ -403,7 +403,73 @@ never rebind.
   version. So: patch releases stay fully automatic; a minor or major is cut by
   bumping the version inside the PR that earns it, nothing more. The v1.0.0
   cut itself used this path.
-- **Marketplace:** the listing is re-published from the v1.0.0 release
-  (web-UI step) and the interim `v0` Release — the pre-1.0 listing anchor —
-  is deleted afterwards. The `v0` tag stays frozen at v0.0.11 for consumers
-  pinned to `@v0`.
+- **Marketplace:** publishing a release to the Marketplace is a **per-release**
+  checkbox that exists only in the web release form. There is no REST field on
+  the release object and no GraphQL mutation for it, so `gh release create`
+  cannot set it and an automated release line can never list its own versions.
+
+  _Corrected 2026-09-11._ This section previously claimed a listed action
+  surfaces new releases by itself. It does not: measured that day, the
+  listing's published-release set was `[v0]` while the repository's newest
+  release was v1.14.0 — every release from v1.0.0 on was created by the bot and
+  is absent from the Marketplace. Nothing downstream broke, because
+  `uses: …@v1` resolves a git ref and never consults the Marketplace; only the
+  listing's version list was stale.
+
+  The fix is one Release on the **moving major tag**, which `sync-release-tags`
+  now creates. Publishing that single Release by hand keeps the listing current
+  for every later version, because the tag is re-pointed under it on each
+  release. Its body names no version, so it cannot go stale.
+
+  The interim `v0` Release — the pre-1.0 listing anchor — was kept, its notes
+  rewritten as a frozen-line notice, and the `v0` tag stays frozen at v0.0.11
+  for consumers pinned to `@v0`.
+
+## Addendum (2026-09-03): one magnitude language across the cards
+
+A legibility pass triggered by a reader question the cards could not answer:
+what does the blue mean? The accent color meant _commits_ on the composition
+card and _peak_ on three others, and nothing said so anywhere.
+
+- **One quantity, one ramp.** Every card that answers "how much activity" now
+  fills from GitHub's contribution green, via `src/cards/legend.ts`. The accent
+  is back to a single, categorical meaning (composition's commits series), and
+  the peak cell on the cadence grid is marked with a foreground-ink ring rather
+  than a second hue.
+- **Bars start at ramp level 2, cells do not.** Level 1 of the dark ramp
+  (`#0e4429`) is 1.7:1 against the dark canvas — fine for a 10px calendar cell
+  read as texture, not for a bar that has to be read. `barFill` therefore maps
+  a series onto the ramp's top three steps; the punch-card dots keep the full
+  quartile ramp, matching the calendar cards exactly.
+- **The `Less … More` key is one function.** `rampLegend` replaced the copies
+  in `contributions` and `lifetime` and now serves `cadence`, whose color and
+  dot size are the only quantity channels it has. Bar cards carry no key: bar
+  length already states the quantity and the ink only reinforces it.
+- **Provenance belongs on the card.** `rhythm` bucketed the contribution
+  calendar (all types), but its note said only "all years"; it now reads
+  "all contribution types · all years", opens its footer with the population
+  the panels split, and labels every month bar rather than only the peak.
+- **A ranked list beats a wrapped legend.** The languages legend ran across
+  three columns before wrapping, so rank 4 sat directly under rank 1. It is now
+  a single vertical list beside the treemap — on the **right**, where a chart's
+  key belongs: the figure is read first and the key when it is needed. (It was
+  briefly placed left; that makes the list the subject and the treemap its
+  illustration, which is not what the card is.) Because the list is one column,
+  its length is now a knob: `language-limit` sets how many languages precede
+  "Other", and the treemap grows to match so the figure never sits stranded
+  above a long list.
+- **"Other" stays last, whatever its size.** Sorting the folded tail in with
+  the languages was tried and reverted: a residual bucket does not compete for
+  a rank, and putting a row labelled "Other" above named languages reads as a
+  sorting bug even when it is arithmetically correct. Convention wins over the
+  local monotonicity it costs squarify.
+- **Densification:** `cadence` gained the marginal hour-of-day histogram and
+  shaded night bands (behind the histogram only — shading the grid would
+  swallow its level-0 dots in the dark theme); `repositories` gained a primary
+  language dot and a star count per row, drawn as a path because the embedded
+  font is subset to the characters the cards typeset; `overview` filled three
+  empty tile captions with scope notes.
+- **Two guards had rotted.** `scripts/check-const-only.ts` was documented as
+  chained into `pnpm run lint` but was not wired anywhere, and the local
+  example gallery still rendered six of the eight cards. Both are fixed; the
+  gallery list now mirrors `action.yml`'s `cards` default.

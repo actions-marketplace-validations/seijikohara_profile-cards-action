@@ -36,15 +36,23 @@ registerHooks({
   },
 });
 
-const [{ renderBadges }, { renderCard }, { computeStreaks }, { resolveFonts }, { fetchProfile }, { DARK, LIGHT }] =
-  await Promise.all([
-    import('../src/badges.js'),
-    import('../src/cards.js'),
-    import('../src/compute/streaks.js'),
-    import('../src/fonts.js'),
-    import('../src/github/fetch-profile.js'),
-    import('../src/theme.js'),
-  ]);
+const [
+  { renderBadges },
+  { renderCard },
+  { computeStreaks },
+  { resolveFonts },
+  { fetchProfile },
+  { KNOWN_CARDS },
+  { DARK, LIGHT },
+] = await Promise.all([
+  import('../src/badges.js'),
+  import('../src/cards.js'),
+  import('../src/compute/streaks.js'),
+  import('../src/fonts.js'),
+  import('../src/github/fetch-profile.js'),
+  import('../src/inputs.js'),
+  import('../src/theme.js'),
+]);
 
 const token = process.env['GITHUB_TOKEN'];
 if (token === undefined || token.trim() === '') {
@@ -54,7 +62,9 @@ if (token === undefined || token.trim() === '') {
 
 const login = process.env['EXAMPLES_LOGIN'] ?? 'seijikohara';
 
-const CARDS: readonly string[] = ['overview', 'lifetime', 'contributions', 'composition', 'rhythm', 'languages'];
+// The renderer's own list, so a card added to the action cannot go missing
+// from the gallery — a gallery missing a card cannot show its regressions.
+const CARDS: readonly string[] = KNOWN_CARDS;
 
 // Three brands simple-icons carries plus one it does not, so the gallery shows
 // both pill shapes: with a glyph and text-only.
